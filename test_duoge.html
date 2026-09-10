@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Three.js R146 多动画并行控制器 Demo</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      overflow: hidden;
+      font-family: system-ui, sans-serif;
+    }
+    #canvas-container {
+      width: 100vw;
+      height: 100vh;
+    }
+    /* 控制面板 */
+    .control-panel {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      background: rgba(0, 0, 0, 0.75);
+      color: #fff;
+      padding: 14px;
+      border-radius: 8px;
+      z-index: 100;
+      min-width: 420px;
+    }
+    .control-panel h4 {
+      margin-bottom: 10px;
+      color: #4cd964;
+    }
+    .row {
+      margin: 6px 0;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+    }
+    input,
+    button,
+    select {
+      padding: 5px 8px;
+      font-size: 13px;
+    }
+    button {
+      cursor: pointer;
+      border: none;
+      border-radius: 4px;
+      background: #2185d0;
+      color: white;
+    }
+    button.danger {
+      background: #db2828;
+    }
+    button.success {
+      background: #21ba45;
+    }
+    button.warn {
+      background: #f29900;
+    }
+    .log-box {
+      margin-top: 10px;
+      background: #111;
+      padding: 8px;
+      height: 160px;
+      overflow-y: auto;
+      font-size: 12px;
+      color: #9cf;
+    }
+  </style>
+</head>
+<body>
+<div id="canvas-container"></div>
+<div class="control-panel">
+  <h4>GLB多动画并行控制器 R146</h4>
+  <div class="row">
+    <label>模型地址:</label>
+    <input type="text" id="modelUrl" placeholder="./model/car_middle.glb" style="width:260px" value="./model/car_middle.glb">
+    <button id="loadBtn" class="success">加载模型</button>
+  </div>
+  <div class="row">
+    <label>可用动画:</label>
+    <select id="animSelect">
+      <option value="">--请先加载模型--</option>
+    </select>
+    <button id="playMultiAnim" class="success">并行播放当前动画(新建实例)</button>
+  </div>
+  <div class="row">
+    <label>片段:</label>
+    <input type="number" id="startTime" value="1" step="0.1" style="width:60px"> ~
+    <input type="number" id="endTime" value="3" step="0.1" style="width:60px">
+    <button id="playSegment">播放片段</button>
+    <button id="playSegmentReverse">片段倒放</button>
+  </div>
+  <div class="row">
+    <button id="playFull">播放完整动画</button>
+    <button id="playReverse">完整动画倒放</button>
+  </div>
+  <div class="row">
+    <label for="playbackRateSelect">播放速率:</label>
+    <select id="playbackRateSelect" title="选择播放速率">
+      <option value="0.25">0.25x</option>
+      <option value="0.5">0.5x</option>
+      <option value="0.75">0.75x</option>
+      <option value="1" selected>1x</option>
+      <option value="1.25">1.25x</option>
+      <option value="1.5">1.5x</option>
+      <option value="2">2x</option>
+      <option value="3">3x</option>
+      <option value="4">4x</option>
+      <option value="5">5x</option>
+      <option value="6">6x</option>
+      <option value="8">8x</option>
+      <option value="10">10x</option>
+    </select>
+    <span style="font-size:12px;color:#aaa;">选择后当前动画同步生效</span>
+  </div>
+  <div class="row">
+    <button id="pauseBtn">全部暂停</button>
+    <button id="resumeBtn">全部继续</button>
+    <button id="stopBtn" class="danger">停止全部动画</button>
+  </div>
+  <div class="row">
+    <label>操作单实例ID:</label>
+    <input type="text" id="instIdInput" placeholder="粘贴日志里的实例ID" style="width:220px">
+    <button class="warn" id="pauseOneBtn">暂停该实例</button>
+    <button class="warn" id="resumeOneBtn">继续该实例</button>
+    <button class="danger" id="stopOneBtn">销毁该实例</button>
+  </div>
+  <div class="row">
+    <label>跳转时间:</label>
+    <input type="number" id="gotoTimeInput" value="2" step="0.1" style="width:60px">
+    <button id="gotoTimeBtn">跳转定格</button>
+    <label>跳转帧:</label>
+    <input type="number" id="gotoFrameInput" value="60" style="width:60px">
+    <button id="gotoFrameBtn">跳转定格</button>
+  </div>
+  <div class="log-box" id="logBox"></div>
+</div>
+
+<script type="module">
+  // ES Module 本地R146路径
+  import * as THREE from './three/r146/build/three.module.js';
+  import { GLTFLoader } from './three/r146/examples/jsm/loaders/GLTFLoader.js';
+  import { OrbitControls } from './three/r146/examples/jsm/controls/OrbitControls.js';
+
+  /**
+   * 支持多动画并行的GLB动画控制器 R146
+   * 核心：每个播放动作生成唯一实例ID，独立管理，互不覆盖
+   */
+  class GlbAnimationController {
+    constructor(scene) {
+      this.scene = scene;
+      this.loader = new GLTFLoader();
+
+      this.gltf = null;
+      this.model = null;
+      this.animator = null;
+
+      // 原始动画缓存 name -> AnimationClip
+      this.clipsMap = new Map();
+      // 动画实例池 instanceId -> {action, clipName, segInfo}
+      this.actionInstances = new Map();
+      // 片段区间配置 key:instanceId
+      this._segmentPlayInfo = new Map();
+
+      this.isPaused = false;
+      this._eventCallbacks = {
+        onAnimationEnd: null,
+        onSegmentEnd: null
+      };
+      this._onMixerFinished = this._handleMixerFinished.bind(this);
+    }
+
+    // 生成唯一动画实例ID
+    _genInstanceId() {
+      return `anim_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    }
+
+    loadModel(url, includeAnimNames = []) {
+      return new Promise((resolve, reject) => {
+        this.loader.load(
+          url,
+          (gltf) => {
+            this.gltf = gltf;
+            this.model = gltf.scene;
+            this.scene.add(this.model);
+
+            this.animator = new THREE.AnimationMixer(this.model);
+            this.animator.addEventListener('finished', this._onMixerFinished);
+
+            this.clipsMap.clear();
+            this.actionInstances.clear();
+            this._segmentPlayInfo.clear();
+
+            const allClips = gltf.animations || [];
+            let useClips = [];
+            if (includeAnimNames.length > 0) {
+              useClips = allClips.filter(clip => includeAnimNames.includes(clip.name));
+            } else {
+              useClips = [...allClips];
+            }
+            useClips.forEach(clip => this.clipsMap.set(clip.name, clip));
+
+            resolve({ model: this.model, clips: useClips });
+          },
+          () => { },
+          (err) => reject(err)
+        );
+      });
+    }
+
+    on(eventName, callback) {
+      if (this._eventCallbacks.hasOwnProperty(eventName)) {
+        this._eventCallbacks[eventName] = callback;
+      }
+    }
+
+    _handleMixerFinished(e) {
+      const action = e.action;
+      if (!action) return;
+      // 片段播放由update拦截，不走mixer完成事件
+      let skip = false;
+      for (const [instId, segInfo] of this._segmentPlayInfo) {
+        const inst = this.actionInstances.get(instId);
+        if (inst?.action === action) skip = true;
+      }
+      if (skip) return;
+      if (typeof this._eventCallbacks.onAnimationEnd === 'function') {
+        this._eventCallbacks.onAnimationEnd(action._clip?.name);
+      }
+    }
+
+    getClipNames() {
+      return Array.from(this.clipsMap.keys());
+    }
+
+    getClipDuration(animName) {
+      const clip = this.clipsMap.get(animName);
+      return clip ? clip.duration : 0;
+    }
+
+    getClipTotalFrames(animName, fps = 30) {
+      const dur = this.getClipDuration(animName);
+      return Math.floor(dur * fps);
+    }
+
+    getCurrentTime(instanceId) {
+      const inst = this.actionInstances.get(instanceId);
+      return inst ? inst.action.time : 0;
+    }
+
+    getCurrentFrame(instanceId, fps = 30) {
+      return Math.floor(this.getCurrentTime(instanceId) * fps);
+    }
+
+    /**
+     * 播放完整动画，返回实例ID，多调用可并行播放
+     * @param {string} animName 动画名称
+     * @param {boolean} loop 是否循环
+     * @param {number} timeScale 播放速度 1正向 -1倒放
+     * @param {number} weight 骨骼混合权重 0~1
+     * @returns string 实例ID
+     */
+    playFull(animName, loop = false, timeScale = 1, weight = 1) {
+      if (!this.animator) return null;
+      const clip = this.clipsMap.get(animName);
+      if (!clip) {
+        console.warn(`不存在动画:${animName}`);
+        return null;
+      }
+      const instanceId = this._genInstanceId();
+      const action = this.animator.clipAction(clip);
+      action.reset();
+      action.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce, Infinity);
+      action.clampWhenFinished = true;
+      action.timeScale = timeScale;
+      action.weight = weight;
+      action.play();
+
+      this.actionInstances.set(instanceId, { action, clipName: animName });
+      this._segmentPlayInfo.delete(instanceId);
+      this.isPaused = false;
+      return instanceId;
+    }
+
+    /**
+     * 播放指定时间段片段，返回实例ID，支持并行
+     */
+    playSegment(animName, startSec, endSec, loop = false, timeScale = 1, weight = 1) {
+      if (!this.animator) return null;
+      const srcClip = this.clipsMap.get(animName);
+      if (!srcClip) {
+        console.warn(`不存在动画:${animName}`);
+        return null;
+      }
+      const dur = srcClip.duration;
+      startSec = Math.max(0, startSec);
+      endSec = Math.min(dur, endSec);
+      if (startSec >= endSec) return null;
+
+      const instanceId = this._genInstanceId();
+      const action = this.animator.clipAction(srcClip);
+      action.reset();
+      action.time = timeScale >= 0 ? startSec : endSec;
+      action.setLoop(THREE.LoopRepeat, Infinity);
+      action.clampWhenFinished = true;
+      action.timeScale = timeScale;
+      action.weight = weight;
+      action.play();
+
+      this.actionInstances.set(instanceId, { action, clipName: animName });
+      this._segmentPlayInfo.set(instanceId, { start: startSec, end: endSec, loop });
+      this.isPaused = false;
+      return instanceId;
+    }
+
+    // 定格到指定时间（生成静止实例）
+    gotoTime(animName, timeSec, weight = 1) {
+      if (!this.animator) return null;
+      const clip = this.clipsMap.get(animName);
+      if (!clip) return null;
+      const dur = clip.duration;
+      timeSec = THREE.MathUtils.clamp(timeSec, 0, dur);
+
+      const instanceId = this._genInstanceId();
+      const action = this.animator.clipAction(clip);
+      action.reset();
+      action.time = timeSec;
+      action.weight = weight;
+      action.play();
+      action.paused = true;
+
+      this.actionInstances.set(instanceId, { action, clipName: animName });
+      this._segmentPlayInfo.delete(instanceId);
+      this.animator.update(0);
+      return instanceId;
+    }
+
+    gotoFrame(animName, frameIndex, fps = 30, weight = 1) {
+      return this.gotoTime(animName, frameIndex / fps, weight);
+    }
+
+    // 全部暂停，打印每个实例当前时间
+    pauseAll() {
+      if (!this.animator) return;
+      this.isPaused = true;
+      for (const [instId, inst] of this.actionInstances) {
+        inst.action.paused = true;
+        const t = inst.action.time.toFixed(3);
+        console.log(`[全局暂停] ID:${instId} | 动画:${inst.clipName} | 当前时间:${t}s`);
+      }
+    }
+
+    // 全部继续
+    resumeAll() {
+      if (!this.animator) return;
+      this.isPaused = false;
+      for (const inst of this.actionInstances.values()) {
+        inst.action.paused = false;
+      }
+    }
+
+    // 单独暂停某个实例
+    pauseOne(instanceId) {
+      const inst = this.actionInstances.get(instanceId);
+      if (!inst) return false;
+      inst.action.paused = true;
+      const t = inst.action.time.toFixed(3);
+      console.log(`[单实例暂停] ID:${instanceId} | ${inst.clipName} | ${t}s`);
+      return true;
+    }
+
+    // 单独继续某个实例
+    resumeOne(instanceId) {
+      const inst = this.actionInstances.get(instanceId);
+      if (!inst) return false;
+      inst.action.paused = false;
+      return true;
+    }
+
+    // 单独停止销毁实例
+    stopOne(instanceId) {
+      const inst = this.actionInstances.get(instanceId);
+      if (!inst) return false;
+      inst.action.stop();
+      inst.action.reset();
+      this.actionInstances.delete(instanceId);
+      this._segmentPlayInfo.delete(instanceId);
+      return true;
+    }
+
+    // 全部停止清空
+    stopAll() {
+      if (!this.animator) return;
+      for (const inst of this.actionInstances.values()) {
+        inst.action.stop();
+        inst.action.reset();
+      }
+      this.actionInstances.clear();
+      this._segmentPlayInfo.clear();
+    }
+
+    // 修改单个实例播放速度
+    setInstanceTimeScale(instanceId, scale) {
+      const inst = this.actionInstances.get(instanceId);
+      if (inst) inst.action.timeScale = scale;
+    }
+
+    // 修改全部实例播放速度，保留正向/倒放方向
+    setAllTimeScale(scale) {
+      const safeScale = Math.max(0.01, Number(scale) || 1);
+      for (const inst of this.actionInstances.values()) {
+        const direction = inst.action.timeScale < 0 ? -1 : 1;
+        inst.action.timeScale = direction * safeScale;
+      }
+    }
+
+    // 每帧更新，处理片段边界
+    update(delta) {
+      if (!this.animator || this.isPaused) return;
+      this.animator.update(delta);
+
+      const toRemove = [];
+      for (const [instId, segInfo] of this._segmentPlayInfo) {
+        const inst = this.actionInstances.get(instId);
+        if (!inst) { toRemove.push(instId); continue; }
+        const { action } = inst;
+        const { start, end, loop } = segInfo;
+        const t = action.time;
+        const speed = action.timeScale;
+
+        if (speed > 0 && t >= end) {
+          if (loop) action.time = start;
+          else {
+            action.paused = true;
+            toRemove.push(instId);
+            if (typeof this._eventCallbacks.onSegmentEnd === 'function') {
+              this._eventCallbacks.onSegmentEnd(inst.clipName);
+            }
+          }
+        }
+        if (speed < 0 && t <= start) {
+          if (loop) action.time = end;
+          else {
+            action.paused = true;
+            toRemove.push(instId);
+            if (typeof this._eventCallbacks.onSegmentEnd === 'function') {
+              this._eventCallbacks.onSegmentEnd(inst.clipName);
+            }
+          }
+        }
+      }
+      toRemove.forEach(id => this._segmentPlayInfo.delete(id));
+    }
+
+    dispose() {
+      this.stopAll();
+      if (this.animator) {
+        this.animator.removeEventListener('finished', this._onMixerFinished);
+      }
+      if (this.model) {
+        this.scene.remove(this.model);
+        this.model.traverse(obj => {
+          if (obj.geometry) obj.geometry.dispose();
+          if (obj.material) {
+            Array.isArray(obj.material)
+              ? obj.material.forEach(m => m.dispose())
+              : obj.material.dispose();
+          }
+        });
+      }
+      this.model = null;
+      this.gltf = null;
+      this.animator = null;
+      this.clipsMap.clear();
+      this.actionInstances.clear();
+      this._segmentPlayInfo.clear();
+    }
+  }
+
+  // ---------------------- 页面业务逻辑 ----------------------
+  const scene = new THREE.Scene();
+  const container = document.getElementById('canvas-container');
+  const camera = new THREE.PerspectiveCamera(60, container.clientWidth / container.clientHeight, 0.1, 2000);
+  camera.position.set(4, 3, 6);
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(container.clientWidth, container.clientHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.shadowMap.enabled = true;
+  container.appendChild(renderer.domElement);
+
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  const clock = new THREE.Clock();
+
+  // 增强四光源解决模型偏暗
+  const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+  scene.add(ambientLight);
+  const sunLight = new THREE.DirectionalLight(0xffffff, 1.1);
+  sunLight.position.set(8, 12, 8);
+  sunLight.castShadow = true;
+  scene.add(sunLight);
+  const backLight = new THREE.DirectionalLight(0xffffff, 0.6);
+  backLight.position.set(-6, 8, -6);
+  scene.add(backLight);
+  const rimLight = new THREE.DirectionalLight(0xfff8dc, 0.4);
+  rimLight.position.set(0, 10, -8);
+  scene.add(rimLight);
+
+  // 地面
+  const groundGeo = new THREE.PlaneGeometry(50, 50);
+  const groundMat = new THREE.MeshStandardMaterial({ color: 0x444444 });
+  const ground = new THREE.Mesh(groundGeo, groundMat);
+  ground.rotation.x = -Math.PI / 2;
+  scene.add(ground);
+
+  // 控制器实例
+  const animCtrl = new GlbAnimationController(scene);
+  const logBox = document.getElementById('logBox');
+
+  // 日志打印工具
+  function log(text) {
+    const div = document.createElement('div');
+    div.textContent = `[${new Date().toLocaleTimeString()}] ${text}`;
+    logBox.appendChild(div);
+    logBox.scrollTop = logBox.scrollHeight;
+  }
+
+  // 事件监听
+  animCtrl.on('onAnimationEnd', (name) => {
+    log(`✅ 完整动画播放结束：${name}`);
+  });
+  animCtrl.on('onSegmentEnd', (name) => {
+    log(`✅ 片段动画播放结束：${name}`);
+  });
+
+  const animSelect = document.getElementById('animSelect');
+  const modelUrlInput = document.getElementById('modelUrl');
+  const instIdInput = document.getElementById('instIdInput');
+
+  const playbackRateSelect = document.getElementById('playbackRateSelect');
+  let playbackRate = Number(playbackRateSelect.value) || 1;
+  playbackRateSelect.value = String(playbackRate);
+
+  playbackRateSelect.onchange = () => {
+    playbackRate = Number(playbackRateSelect.value) || 1;
+    animCtrl.setAllTimeScale(playbackRate);
+    log(`播放速率已调整为 ${playbackRate}x，当前动画同步生效`);
+  };
+
+  // 加载模型
+  document.getElementById('loadBtn').onclick = async () => {
+    const url = modelUrlInput.value.trim();
+    if (!url) return log('❌ 请输入模型地址');
+    try {
+      log(`正在加载模型: ${url}`);
+      await animCtrl.loadModel(url, []);
+      log('🎉 模型加载成功！');
+      const names = animCtrl.getClipNames();
+      animSelect.innerHTML = '';
+      names.forEach(n => {
+        const opt = document.createElement('option');
+        opt.value = n;
+        opt.textContent = n;
+        animSelect.appendChild(opt);
+      });
+      log(`可用动画列表：${names.join(',')}`);
+    } catch (e) {
+      log(`❌ 加载失败: ${e.message}`);
+    }
+  };
+
+  // 播放完整动画（生成新实例，可多开）
+  document.getElementById('playFull').onclick = () => {
+    const anim = animSelect.value;
+    const id = animCtrl.playFull(anim, false, playbackRate);
+    log(`▶ 完整正向播放 | 动画:${anim} | 速率:${playbackRate}x | 实例ID:${id}`);
+    instIdInput.value = id;
+  };
+  // 完整倒放
+  document.getElementById('playReverse').onclick = () => {
+    const anim = animSelect.value;
+    const id = animCtrl.playFull(anim, false, -playbackRate);
+    log(`◀ 完整倒放 | 动画:${anim} | 速率:${playbackRate}x | 实例ID:${id}`);
+    instIdInput.value = id;
+  };
+  // 并行多实例测试（多次点击生成多个同动画叠加）
+  document.getElementById('playMultiAnim').onclick = () => {
+    const anim = animSelect.value;
+    const id = animCtrl.playFull(anim, true, playbackRate, 0.6);
+    log(`🔥 新建并行动画实例 | ${anim} | 速率:${playbackRate}x | ID:${id}`);
+    instIdInput.value = id;
+  };
+  // 片段正向
+  document.getElementById('playSegment').onclick = () => {
+    const anim = animSelect.value;
+    const s = Number(document.getElementById('startTime').value);
+    const e = Number(document.getElementById('endTime').value);
+    const id = animCtrl.playSegment(anim, s, e, false, playbackRate);
+    log(`▶ 片段播放 ${s}~${e}s | 速率:${playbackRate}x | ID:${id}`);
+    instIdInput.value = id;
+  };
+  // 片段倒放
+  document.getElementById('playSegmentReverse').onclick = () => {
+    const anim = animSelect.value;
+    const s = Number(document.getElementById('startTime').value);
+    const e = Number(document.getElementById('endTime').value);
+    const id = animCtrl.playSegment(anim, s, e, false, -playbackRate);
+    log(`◀ 片段倒放 ${e}~${s}s | 速率:${playbackRate}x | ID:${id}`);
+    instIdInput.value = id;
+  };
+
+  // 全局暂停/继续/停止
+  document.getElementById('pauseBtn').onclick = () => {
+    animCtrl.pauseAll();
+    log('⏸ 全部动画已暂停，控制台查看各实例暂停时间');
+  };
+  document.getElementById('resumeBtn').onclick = () => {
+    animCtrl.resumeAll();
+    log('▶ 全部动画继续播放');
+  };
+  document.getElementById('stopBtn').onclick = () => {
+    animCtrl.stopAll();
+    log('⏹ 销毁所有动画实例');
+    instIdInput.value = '';
+  };
+
+  // 单实例操作
+  document.getElementById('pauseOneBtn').onclick = () => {
+    const id = instIdInput.value.trim();
+    if (!id) return log('⚠ 请填入实例ID');
+    const ok = animCtrl.pauseOne(id);
+    ok ? log(`⏸ 已暂停实例:${id}`) : log(`❌ 找不到该实例`);
+  };
+  document.getElementById('resumeOneBtn').onclick = () => {
+    const id = instIdInput.value.trim();
+    if (!id) return log('⚠ 请填入实例ID');
+    const ok = animCtrl.resumeOne(id);
+    ok ? log(`▶ 恢复实例:${id}`) : log(`❌ 找不到该实例`);
+  };
+  document.getElementById('stopOneBtn').onclick = () => {
+    const id = instIdInput.value.trim();
+    if (!id) return log('⚠ 请填入实例ID');
+    const ok = animCtrl.stopOne(id);
+    ok ? log(`🗑 销毁实例:${id}`) : log(`❌ 找不到该实例`);
+  };
+
+  // 定格跳转
+  document.getElementById('gotoTimeBtn').onclick = () => {
+    const anim = animSelect.value;
+    const t = Number(document.getElementById('gotoTimeInput').value);
+    const id = animCtrl.gotoTime(anim, t);
+    log(`📍 定格${t}秒 | ID:${id}`);
+    instIdInput.value = id;
+  };
+  document.getElementById('gotoFrameBtn').onclick = () => {
+    const anim = animSelect.value;
+    const f = Number(document.getElementById('gotoFrameInput').value);
+    const id = animCtrl.gotoFrame(anim, f, 30);
+    log(`📍 定格${f}帧 | ID:${id}`);
+    instIdInput.value = id;
+  };
+
+  // 渲染循环
+  function renderLoop() {
+    requestAnimationFrame(renderLoop);
+    const delta = clock.getDelta();
+    animCtrl.update(delta);
+    controls.update();
+    renderer.render(scene, camera);
+  }
+  renderLoop();
+
+  // 窗口自适应
+  window.addEventListener('resize', () => {
+    camera.aspect = container.clientWidth / container.clientHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(container.clientWidth, window.innerHeight);
+  });
+</script>
+</body>
+</html>
