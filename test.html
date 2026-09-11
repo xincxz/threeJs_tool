@@ -3,145 +3,610 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Three.js R146 多动画并行控制器 Demo</title>
+  <title>三维模型显示</title>
   <style>
+    :root {
+      color-scheme: light;
+      --ink: #26383b;
+      --muted: #6f8284;
+      --panel: rgba(249, 251, 250, 0.94);
+      --field: rgba(255, 255, 255, 0.76);
+      --field-strong: rgba(255, 255, 255, 0.94);
+      --line: rgba(64, 98, 99, 0.14);
+      --danger: #aa5558;
+      --shadow: 0 22px 64px rgba(33, 55, 56, 0.17);
+    }
+
     * {
       margin: 0;
       padding: 0;
       box-sizing: border-box;
     }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+    }
+
     body {
       overflow: hidden;
-      font-family: system-ui, sans-serif;
+      background: #071012;
+      color: var(--ink);
+      font-family: "Segoe UI Variable", "PingFang SC", "Microsoft YaHei", sans-serif;
     }
+
     #canvas-container {
       width: 100vw;
       height: 100vh;
     }
-    /* 控制面板 */
+
     .control-panel {
       position: absolute;
-      top: 12px;
-      left: 12px;
-      background: rgba(0, 0, 0, 0.75);
-      color: #fff;
-      padding: 14px;
-      border-radius: 8px;
+      top: 18px;
+      left: 18px;
       z-index: 100;
-      min-width: 420px;
+      width: min(440px, calc(100vw - 36px));
+      max-height: calc(100vh - 36px);
+      overflow-y: auto;
+      padding: 18px;
+      border: 1px solid rgba(255, 255, 255, 0.78);
+      border-radius: 20px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(20px) saturate(1.12);
     }
-    .control-panel h4 {
-      margin-bottom: 10px;
-      color: #4cd964;
+
+    .control-panel::-webkit-scrollbar,
+    .log-box::-webkit-scrollbar {
+      width: 8px;
     }
-    .row {
-      margin: 6px 0;
+
+    .control-panel::-webkit-scrollbar-thumb,
+    .log-box::-webkit-scrollbar-thumb {
+      border: 2px solid transparent;
+      border-radius: 999px;
+      background: rgba(87, 119, 120, 0.32);
+      background-clip: padding-box;
+    }
+
+    .panel-header {
       display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 2px 2px 16px;
+    }
+
+    .version-pill {
+      display: inline-flex;
+      margin-bottom: 7px;
+      color: #4c8d82;
+      font-size: 0.68rem;
+      font-weight: 750;
+      letter-spacing: 0.045em;
+    }
+
+    .panel-header h1 {
+      color: #213438;
+      font-size: 1.1rem;
+      line-height: 1.25;
+      letter-spacing: -0.018em;
+    }
+
+    .panel-header p {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 0.72rem;
+      line-height: 1.45;
+    }
+
+    .local-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      flex: 0 0 auto;
+      margin-top: 2px;
+      padding: 6px 9px;
+      border: 1px solid rgba(78, 145, 133, 0.18);
+      border-radius: 999px;
+      background: rgba(89, 158, 145, 0.08);
+      color: #4f8178;
+      font-size: 0.66rem;
+      white-space: nowrap;
+    }
+
+    .local-badge::before {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #66a99d;
+      box-shadow: 0 0 0 4px rgba(102, 169, 157, 0.1);
+      content: "";
+    }
+
+    .panel-section {
+      --tone: #789391;
+      --tone-strong: #4f7773;
+      --tone-soft: rgba(120, 147, 145, 0.07);
+      --tone-soft-strong: rgba(120, 147, 145, 0.13);
+      --tone-line: rgba(95, 128, 125, 0.19);
+      --tone-ring: rgba(95, 128, 125, 0.1);
+      margin-top: 12px;
+      padding: 0 14px 14px;
+      border: 1px solid var(--tone-line);
+      border-left: 5px solid var(--tone);
+      border-radius: 14px;
+      background: var(--tone-soft);
+    }
+
+    .section-resource {
+      --tone: #3f9a82;
+      --tone-strong: #286c5d;
+      --tone-soft: rgba(67, 164, 137, 0.15);
+      --tone-soft-strong: rgba(67, 164, 137, 0.28);
+      --tone-line: rgba(43, 133, 108, 0.42);
+      --tone-ring: rgba(43, 133, 108, 0.18);
+    }
+
+    .section-playback {
+      --tone: #4f7fb9;
+      --tone-strong: #365d8f;
+      --tone-soft: rgba(79, 127, 185, 0.15);
+      --tone-soft-strong: rgba(79, 127, 185, 0.28);
+      --tone-line: rgba(55, 98, 153, 0.42);
+      --tone-ring: rgba(55, 98, 153, 0.18);
+    }
+
+    .section-instance {
+      --tone: #c47742;
+      --tone-strong: #8d4f25;
+      --tone-soft: rgba(196, 119, 66, 0.14);
+      --tone-soft-strong: rgba(196, 119, 66, 0.27);
+      --tone-line: rgba(167, 92, 40, 0.4);
+      --tone-ring: rgba(167, 92, 40, 0.18);
+    }
+
+    .section-log {
+      --tone: #7d65b2;
+      --tone-strong: #58447f;
+      --tone-soft: rgba(125, 101, 178, 0.14);
+      --tone-soft-strong: rgba(125, 101, 178, 0.27);
+      --tone-line: rgba(96, 72, 151, 0.4);
+      --tone-ring: rgba(96, 72, 151, 0.18);
+    }
+
+    .section-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      margin: 0 -14px 12px;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--tone-line);
+      border-radius: 10px 10px 0 0;
+      background: var(--tone-soft-strong);
+    }
+
+    .section-head h2 {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      color: var(--tone-strong);
+      font-size: 0.76rem;
+      font-weight: 760;
+      letter-spacing: 0.012em;
+    }
+
+    .section-head h2::before {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--tone);
+      box-shadow: 0 0 0 4px var(--tone-ring);
+      content: "";
+    }
+
+    .section-head span {
+      color: var(--tone-strong);
+      font-size: 0.64rem;
+      font-weight: 620;
+      line-height: 1.3;
+      opacity: 0.76;
+      text-align: right;
+    }
+
+    .row {
+      display: grid;
+      gap: 7px;
+      margin-top: 11px;
+    }
+
+    label {
+      color: var(--muted);
+      font-size: 0.7rem;
+      font-weight: 650;
+      letter-spacing: 0.012em;
+    }
+
+    input,
+    select,
+    button {
+      font: inherit;
+    }
+
+    input,
+    select {
+      width: 100%;
+      min-width: 0;
+      height: 36px;
+      padding: 0 11px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      outline: none;
+      background: var(--field);
+      color: var(--ink);
+      transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
+    }
+
+    input[type="number"] {
+      font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+      font-variant-numeric: tabular-nums;
+    }
+
+    input::placeholder {
+      color: #99a9aa;
+    }
+
+    select {
+      cursor: pointer;
+    }
+
+    select option {
+      background: #fbfdfc;
+      color: var(--ink);
+    }
+
+    .animation-select {
+      height: 112px;
+      padding: 6px;
+      cursor: default;
+    }
+
+    .animation-select option {
+      padding: 6px 8px;
+      border-radius: 6px;
+    }
+
+    .animation-select option:checked {
+      background: var(--tone-soft-strong);
+      color: var(--tone-strong);
+    }
+
+    .panel-section input:focus,
+    .panel-section select:focus {
+      border-color: var(--tone-line);
+      background: var(--field-strong);
+      box-shadow: 0 0 0 3px var(--tone-ring);
+    }
+
+    button {
+      min-height: 36px;
+      padding: 0 12px;
+      border: 1px solid var(--tone-line);
+      border-radius: 9px;
+      background: var(--tone-soft-strong);
+      color: var(--tone-strong);
+      font-size: 0.72rem;
+      font-weight: 720;
+      letter-spacing: 0.008em;
+      white-space: nowrap;
+      cursor: pointer;
+      transition: transform 140ms ease, border-color 140ms ease, background 140ms ease;
+    }
+
+    button:hover {
+      border-color: var(--tone);
+      background: var(--tone-soft-strong);
+      filter: saturate(1.08);
+    }
+
+    button:active {
+      transform: translateY(1px);
+    }
+
+    button:focus-visible {
+      outline: 2px solid var(--tone);
+      outline-offset: 2px;
+    }
+
+    button.danger {
+      border-color: rgba(170, 85, 88, 0.24);
+      background: rgba(170, 85, 88, 0.08);
+      color: var(--danger);
+    }
+
+    button.danger:hover {
+      border-color: rgba(170, 85, 88, 0.42);
+      background: rgba(170, 85, 88, 0.12);
+    }
+
+    .field-action {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
       align-items: center;
     }
-    input,
-    button,
-    select {
-      padding: 5px 8px;
-      font-size: 13px;
+
+    .field-action button {
+      padding-inline: 14px;
     }
-    button {
-      cursor: pointer;
-      border: none;
-      border-radius: 4px;
-      background: #2185d0;
-      color: white;
+
+    .time-range {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+      gap: 8px;
+      align-items: center;
     }
-    button.danger {
-      background: #db2828;
+
+    .time-range span {
+      color: var(--muted);
+      font-size: 0.68rem;
     }
-    button.success {
-      background: #21ba45;
+
+    .button-grid {
+      display: grid;
+      gap: 8px;
     }
-    button.warn {
-      background: #f29900;
+
+    .button-grid.two {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
+
+    .button-grid.three {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .button-grid button {
+      padding-inline: 8px;
+      font-size: 0.7rem;
+    }
+
+    .rate-row {
+      grid-template-columns: auto minmax(112px, 150px) minmax(0, 1fr);
+      align-items: center;
+      gap: 10px;
+    }
+
+    .rate-row label {
+      margin: 0;
+    }
+
+    .rate-row select {
+      height: 34px;
+    }
+
+    .hint {
+      color: var(--muted);
+      font-size: 0.64rem;
+      line-height: 1.4;
+    }
+
+    .goto-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 11px;
+    }
+
+    .goto-item {
+      display: grid;
+      gap: 6px;
+      min-width: 0;
+    }
+
+    .goto-item .field-action {
+      grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .goto-item button {
+      padding-inline: 10px;
+    }
+
     .log-box {
-      margin-top: 10px;
-      background: #111;
-      padding: 8px;
-      height: 160px;
+      height: 152px;
+      padding: 10px 11px;
       overflow-y: auto;
-      font-size: 12px;
-      color: #9cf;
+      border: 1px solid var(--tone-line);
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.6);
+      color: #625b7a;
+      font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+      font-size: 0.68rem;
+      line-height: 1.55;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+
+    .log-box div + div {
+      margin-top: 3px;
+    }
+
+    @media (max-width: 680px) {
+      .control-panel {
+        top: 8px;
+        left: 8px;
+        width: calc(100vw - 16px);
+        max-height: calc(100vh - 16px);
+        padding: 15px;
+        border-radius: 16px;
+      }
+
+      .panel-section {
+        padding: 0 12px 12px;
+      }
+
+      .section-head {
+        margin: 0 -12px 10px;
+        padding: 9px 12px;
+      }
+
+      .section-head span,
+      .hint {
+        display: none;
+      }
+
+      .rate-row {
+        grid-template-columns: auto minmax(0, 1fr);
+      }
+
+      .goto-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *,
+      *::before,
+      *::after {
+        scroll-behavior: auto !important;
+        transition: none !important;
+      }
     }
   </style>
 </head>
 <body>
 <div id="canvas-container"></div>
-<div class="control-panel">
-  <h4>GLB多动画并行控制器 R146</h4>
-  <div class="row">
-    <label>模型地址:</label>
-    <input type="text" id="modelUrl" placeholder="./model/car_middle.glb" style="width:260px" value="./model/car_middle.glb">
-    <button id="loadBtn" class="success">加载模型</button>
-  </div>
-  <div class="row">
-    <label>可用动画:</label>
-    <select id="animSelect">
-      <option value="">--请先加载模型--</option>
-    </select>
-    <button id="playMultiAnim" class="success">并行播放当前动画(新建实例)</button>
-  </div>
-  <div class="row">
-    <label>片段:</label>
-    <input type="number" id="startTime" value="1" step="0.1" style="width:60px"> ~
-    <input type="number" id="endTime" value="3" step="0.1" style="width:60px">
-    <button id="playSegment">播放片段</button>
-    <button id="playSegmentReverse">片段倒放</button>
-  </div>
-  <div class="row">
-    <button id="playFull">播放完整动画</button>
-    <button id="playReverse">完整动画倒放</button>
-  </div>
-  <div class="row">
-    <label for="playbackRateSelect">播放速率:</label>
-    <select id="playbackRateSelect" title="选择播放速率">
-      <option value="0.25">0.25x</option>
-      <option value="0.5">0.5x</option>
-      <option value="0.75">0.75x</option>
-      <option value="1" selected>1x</option>
-      <option value="1.25">1.25x</option>
-      <option value="1.5">1.5x</option>
-      <option value="2">2x</option>
-      <option value="3">3x</option>
-      <option value="4">4x</option>
-      <option value="5">5x</option>
-      <option value="6">6x</option>
-      <option value="8">8x</option>
-      <option value="10">10x</option>
-    </select>
-    <span style="font-size:12px;color:#aaa;">选择后当前动画同步生效</span>
-  </div>
-  <div class="row">
-    <button id="pauseBtn">全部暂停</button>
-    <button id="resumeBtn">全部继续</button>
-    <button id="stopBtn" class="danger">停止全部动画</button>
-  </div>
-  <div class="row">
-    <label>操作单实例ID:</label>
-    <input type="text" id="instIdInput" placeholder="粘贴日志里的实例ID" style="width:220px">
-    <button class="warn" id="pauseOneBtn">暂停该实例</button>
-    <button class="warn" id="resumeOneBtn">继续该实例</button>
-    <button class="danger" id="stopOneBtn">销毁该实例</button>
-  </div>
-  <div class="row">
-    <label>跳转时间:</label>
-    <input type="number" id="gotoTimeInput" value="2" step="0.1" style="width:60px">
-    <button id="gotoTimeBtn">跳转定格</button>
-    <label>跳转帧:</label>
-    <input type="number" id="gotoFrameInput" value="60" style="width:60px">
-    <button id="gotoFrameBtn">跳转定格</button>
-  </div>
-  <div class="log-box" id="logBox"></div>
-</div>
+<aside class="control-panel" aria-label="GLB 动画控制面板">
+  <header class="panel-header">
+    <div>
+      <span class="version-pill">Three.js R146</span>
+      <h1>GLB 多动画控制台</h1>
+      <p>并行播放、片段裁切与时间定位</p>
+    </div>
+    <span class="local-badge">本地资源</span>
+  </header>
+
+  <section class="panel-section section-resource">
+    <div class="section-head">
+      <h2>资源</h2>
+      <span>加载模型并选择动画</span>
+    </div>
+    <div class="row">
+      <label for="modelUrl">模型地址</label>
+      <div class="field-action">
+        <input type="text" id="modelUrl" placeholder="./model/car_middle.glb" value="./model/car_middle.glb">
+        <button id="loadBtn" class="success" type="button">加载模型</button>
+      </div>
+    </div>
+    <div class="row">
+      <label for="animSelect">可用动画</label>
+      <div class="field-action">
+        <select id="animSelect" class="animation-select" multiple size="4" aria-describedby="animSelectHint">
+          <option value="">--请先加载模型--</option>
+        </select>
+        <button id="playMultiAnim" class="success" type="button" title="同时循环播放选中的多个动画">同时播放</button>
+      </div>
+      <span class="hint" id="animSelectHint">按住 Ctrl / Command 可同时选择多个动画</span>
+    </div>
+  </section>
+
+  <section class="panel-section section-playback">
+    <div class="section-head">
+      <h2>播放控制</h2>
+      <span>片段、完整动画和速率</span>
+    </div>
+    <div class="row">
+      <label>播放片段</label>
+      <div class="time-range">
+        <input type="number" id="startTime" value="1" step="0.1" aria-label="片段开始时间">
+        <span>至</span>
+        <input type="number" id="endTime" value="3" step="0.1" aria-label="片段结束时间">
+      </div>
+      <div class="button-grid two">
+        <button id="playSegment" type="button">播放片段</button>
+        <button id="playSegmentReverse" type="button">片段倒放</button>
+      </div>
+    </div>
+    <div class="row">
+      <label>完整动画</label>
+      <div class="button-grid two">
+        <button id="playFull" type="button">播放完整动画</button>
+        <button id="playReverse" type="button">完整动画倒放</button>
+      </div>
+    </div>
+    <div class="row rate-row">
+      <label for="playbackRateSelect">播放速率</label>
+      <select id="playbackRateSelect" title="选择播放速率">
+        <option value="0.25">0.25x</option>
+        <option value="0.5">0.5x</option>
+        <option value="0.75">0.75x</option>
+        <option value="1" selected>1x</option>
+        <option value="1.25">1.25x</option>
+        <option value="1.5">1.5x</option>
+        <option value="2">2x</option>
+        <option value="3">3x</option>
+        <option value="4">4x</option>
+        <option value="5">5x</option>
+        <option value="6">6x</option>
+        <option value="8">8x</option>
+        <option value="10">10x</option>
+      </select>
+      <span class="hint">选择后实时生效</span>
+    </div>
+    <div class="row">
+      <label>全局控制</label>
+      <div class="button-grid three">
+        <button id="pauseBtn" type="button">全部暂停</button>
+        <button id="resumeBtn" type="button">全部继续</button>
+        <button id="stopBtn" class="danger" type="button">停止全部</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel-section section-instance">
+    <div class="section-head">
+      <h2>实例与定位</h2>
+      <span>操作指定实例或跳转时间</span>
+    </div>
+    <div class="row">
+      <label for="instIdInput">实例 ID</label>
+      <input type="text" id="instIdInput" placeholder="粘贴日志里的实例 ID">
+    </div>
+    <div class="row">
+      <div class="button-grid three">
+        <button class="warn" id="pauseOneBtn" type="button">暂停实例</button>
+        <button class="warn" id="resumeOneBtn" type="button">继续实例</button>
+        <button class="danger" id="stopOneBtn" type="button">销毁实例</button>
+      </div>
+    </div>
+    <div class="goto-grid">
+      <div class="goto-item">
+        <label for="gotoTimeInput">跳转时间</label>
+        <div class="field-action">
+          <input type="number" id="gotoTimeInput" value="2" step="0.1">
+          <button id="gotoTimeBtn" type="button">定格</button>
+        </div>
+      </div>
+      <div class="goto-item">
+        <label for="gotoFrameInput">跳转帧</label>
+        <div class="field-action">
+          <input type="number" id="gotoFrameInput" value="60">
+          <button id="gotoFrameBtn" type="button">定格</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel-section section-log">
+    <div class="section-head">
+      <h2>运行日志</h2>
+      <span>自动滚动到最新</span>
+    </div>
+    <div class="log-box" id="logBox" aria-live="polite"></div>
+  </section>
+</aside>
 
 <script type="module">
   // ES Module 本地R146路径
@@ -555,6 +1020,42 @@
     log(`播放速率已调整为 ${playbackRate}x，当前动画同步生效`);
   };
 
+  function getSelectedAnimNames() {
+    return Array.from(animSelect.selectedOptions, option => option.value).filter(Boolean);
+  }
+
+  function playSelectedAnimations(label, createAction) {
+    const names = getSelectedAnimNames();
+    if (!names.length) {
+      log('❌ 请先选择至少一个动画');
+      return;
+    }
+
+    const played = [];
+    const skipped = [];
+    for (const name of names) {
+      const id = createAction(name);
+      if (id) played.push({ name, id });
+      else skipped.push(name);
+    }
+
+    if (!played.length) {
+      log(`❌ ${label}失败${skipped.length ? `：${skipped.join('、')}` : ''}`);
+      return;
+    }
+
+    instIdInput.value = played[played.length - 1].id;
+    const summary = [
+      label,
+      `动画:${played.map(item => item.name).join('、')}`,
+      `速率:${playbackRate}x`,
+      `ID:${played.map(item => item.id).join('、')}`
+    ];
+    if (skipped.length) summary.push(`跳过:${skipped.join('、')}`);
+    log(summary.join(' | '));
+  }
+
+
   // 加载模型
   document.getElementById('loadBtn').onclick = async () => {
     const url = modelUrlInput.value.trim();
@@ -565,10 +1066,11 @@
       log('🎉 模型加载成功！');
       const names = animCtrl.getClipNames();
       animSelect.innerHTML = '';
-      names.forEach(n => {
+      names.forEach((n, index) => {
         const opt = document.createElement('option');
         opt.value = n;
         opt.textContent = n;
+        if (index === 0) opt.selected = true;
         animSelect.appendChild(opt);
       });
       log(`可用动画列表：${names.join(',')}`);
@@ -579,44 +1081,28 @@
 
   // 播放完整动画（生成新实例，可多开）
   document.getElementById('playFull').onclick = () => {
-    const anim = animSelect.value;
-    const id = animCtrl.playFull(anim, false, playbackRate);
-    log(`▶ 完整正向播放 | 动画:${anim} | 速率:${playbackRate}x | 实例ID:${id}`);
-    instIdInput.value = id;
+    playSelectedAnimations('▶ 完整正向播放', name => animCtrl.playFull(name, false, playbackRate));
   };
   // 完整倒放
   document.getElementById('playReverse').onclick = () => {
-    const anim = animSelect.value;
-    const id = animCtrl.playFull(anim, false, -playbackRate);
-    log(`◀ 完整倒放 | 动画:${anim} | 速率:${playbackRate}x | 实例ID:${id}`);
-    instIdInput.value = id;
+    playSelectedAnimations('◀ 完整倒放', name => animCtrl.playFull(name, false, -playbackRate));
   };
-  // 并行多实例测试（多次点击生成多个同动画叠加）
+  // 并行循环播放选中的多个动画
   document.getElementById('playMultiAnim').onclick = () => {
-    const anim = animSelect.value;
-    const id = animCtrl.playFull(anim, true, playbackRate, 0.6);
-    log(`🔥 新建并行动画实例 | ${anim} | 速率:${playbackRate}x | ID:${id}`);
-    instIdInput.value = id;
+    playSelectedAnimations('🔥 并行循环播放', name => animCtrl.playFull(name, true, playbackRate, 0.6));
   };
   // 片段正向
   document.getElementById('playSegment').onclick = () => {
-    const anim = animSelect.value;
     const s = Number(document.getElementById('startTime').value);
     const e = Number(document.getElementById('endTime').value);
-    const id = animCtrl.playSegment(anim, s, e, false, playbackRate);
-    log(`▶ 片段播放 ${s}~${e}s | 速率:${playbackRate}x | ID:${id}`);
-    instIdInput.value = id;
+    playSelectedAnimations(`▶ 片段播放 ${s}~${e}s`, name => animCtrl.playSegment(name, s, e, false, playbackRate));
   };
   // 片段倒放
   document.getElementById('playSegmentReverse').onclick = () => {
-    const anim = animSelect.value;
     const s = Number(document.getElementById('startTime').value);
     const e = Number(document.getElementById('endTime').value);
-    const id = animCtrl.playSegment(anim, s, e, false, -playbackRate);
-    log(`◀ 片段倒放 ${e}~${s}s | 速率:${playbackRate}x | ID:${id}`);
-    instIdInput.value = id;
+    playSelectedAnimations(`◀ 片段倒放 ${e}~${s}s`, name => animCtrl.playSegment(name, s, e, false, -playbackRate));
   };
-
   // 全局暂停/继续/停止
   document.getElementById('pauseBtn').onclick = () => {
     animCtrl.pauseAll();
